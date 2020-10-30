@@ -1,0 +1,118 @@
+---
+title: "Mapping assignment"
+author: "Lin Zhou"
+date: "2020/10/29"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(drat)
+library(ggplot2)
+library(hurricaneexposuredata)
+library(hurricaneexposure)
+library(maps)
+#Data preparation
+MainStates <- map_data("state")
+AllCounty <- map_data("county")
+data("hurr_tracks")
+data("rain")
+floyd_h<- filter(hurr_tracks, storm_id=="Floyd-1999")
+allison_h <- filter(hurr_tracks, storm_id=="Allison-2001")
+floyd_r <- filter(rain, storm_id=="Floyd-1999")
+allison_r <- filter(rain, storm_id=="Allison-2001") 
+f1 <- group_by(floyd_r,fips,storm_id)
+f2 <- summarise(f1, precip_sum = sum(precip), .groups = "drop")
+fips <- county.fips
+fips$fips <- str_pad(fips$fips,5,side = "left",pad = "0")
+f3 <- merge(f2,fips, by="fips")
+f4 <- separate(f3, polyname, sep = ",", into = c("region","subregion"))
+states <- c("texas","oklahoma","kansas","louisiana","arkansas","missouri","iowa",
+            "wisconsin","michigan","illinois","indiana","ohio","kentucky","tennessee",
+            "alabama","mississippi","florida","georgia","south carolina","north carolina",
+            "virginia","west virginia","maryland","delaware","pennsylvania","new jersey",
+            "new york","connecticut","rhode island","massachusetts","vermont",
+            "new hampshire","maine")
+map_states <- map_data("county", states)
+#Find common region
+f5 <- merge(f4,map_states, by = c("region","subregion"))
+f5$phase <- cut(f5$precip_sum,breaks=c(0,75,150,225),include.lowest = T)
+#Floyd-1999 hurricane data = floyd_h
+#Floyd-1999 rainfall data = f5
+#Mapping with ggplot2
+ggplot()+
+  geom_polygon(f5, mapping=aes(x = long, y = lat, group = group, fill = phase))+
+  geom_path(map_states, mapping=aes(x = long, y = lat, group = group),color="black")+
+  geom_path(floyd_h, mapping = aes(x = longitude, y = latitude),color="red")+
+  scale_fill_brewer(palette="Blues")+
+  xlab("Longtitude")+ ylab("Latitude")+
+  ggtitle("Floyd-1999")+
+  labs(fill="Rainfall (mm)")+
+  theme(plot.title = element_text(hjust = 0.5, size = 20))
+
+a1 <- group_by(allison_r,fips,storm_id)
+a2 <- summarise(a1, precip_sum = sum(precip), .groups = "drop")
+a3 <- merge(a2,fips, by="fips")
+a4 <- separate(a3, polyname, sep = ",", into = c("region","subregion"))
+a5 <- merge(a4,map_states, by = c("region","subregion"))
+a5$phase <- ifelse(a5$precip_sum < 175,"Unexposed","Exposed")
+#Allison-2001 hurricane data = allison_h
+#Allison-2001 rainfall data = a5  
+ggplot()+
+  geom_polygon(a5, mapping=aes(x = long, y = lat, group = group, fill = phase))+
+  geom_path(map_states, mapping=aes(x = long, y = lat, group = group),color="black")+
+  geom_path(allison_h, mapping = aes(x=longitude, y=latitude),color="red")+
+  xlab("Longtitude")+ylab("Latitude")+
+  ggtitle("Allison−2001")+
+  labs(fill="Rain >175 mm")+
+  theme(plot.title = element_text(hjust = 0.5, size = 20))
+```
+
+```{r}
+library(tmap)
+library(sf)
+library(sp)
+library(viridis)
+#convert map_states into sf.
+sf_map <- st_as_sf(map("county",states,plot=F,fill=T))
+tf5 <- f5 %>%
+  select(region, subregion, phase) %>%
+  mutate(ID=str_c(region,subregion,sep = ",")) %>% 
+  select(ID,phase) %>% 
+  rename("Rainfall(mm)"= phase)
+tf5 <- left_join(tf5 ,sf_map, by="ID")
+sftf5 <- st_as_sf(tf5)
+tfloyd_h <- cbind(floyd_h$longitude, floyd_h$latitude) %>%
+  Line() %>% Lines(ID='Floyd-1999') %>%
+  list() %>% SpatialLines()
+#mapping with tmap
+tm_shape(sftf5)+
+  tm_polygons(border.col="black",lwd=1, col ="Rainfall(mm)", style="cat", title="Rainfall(mm)", palette=viridis(n=10,direction=-1))+
+  tm_shape(tfloyd_h)+
+  tm_lines(col = "red")+
+  tm_layout(main.title='Floyd-1999',main.title.position="center",main.title.size = 2)
+
+ta5 <- a5 %>%
+  select(region, subregion, phase) %>%
+  mutate(ID=str_c(region,subregion,sep = ",")) %>% 
+  select(ID,phase) %>% 
+  rename("Rainfall(mm)"= phase)
+
+ta5 <- left_join(ta5 ,sf_map, by="ID")
+sfta5 <- st_as_sf(ta5)
+tallison_h <- cbind(allison_h$longitude, allison_h$latitude) %>%
+  Line() %>% Lines(ID="Allison-2001") %>%
+  list() %>% SpatialLines()
+tm_shape(sfta5,title="Floyd-1999")+
+  tm_polygons("Rainfall(mm)",palette=c("pink","yellow"),title="Rain > 175 mm")+
+  tm_shape(tallison_h)+
+  tm_lines(col='red4',lwd=1.2)+
+  tm_style("watercolor")+
+  tm_layout(main.title='Allison-2001')
+```
